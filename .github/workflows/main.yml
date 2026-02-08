@@ -1,0 +1,56 @@
+name: Paylabs CI/CD
+
+on:
+  push:
+    branches: [ test ]
+
+jobs:
+  build-scan-push-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    # AWS Login
+    - name: Configure AWS
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ap-south-1
+
+    # ECR Login
+    - name: Login to ECR
+      uses: aws-actions/amazon-ecr-login@v2
+
+    # Build Backend Image
+    - name: Build Backend
+      run: |
+        docker build -t paylabs-backend ./backend
+        docker tag paylabs-backend:latest \
+        197377640327.dkr.ecr.ap-south-1.amazonaws.com/paylabs-backend:latest
+
+    # Build Frontend Image
+    - name: Build Frontend
+      run: |
+        docker build -t paylabs-frontend ./frontend
+        docker tag paylabs-frontend:latest \
+        197377640327.dkr.ecr.ap-south-1.amazonaws.com/paylabs-frontend:latest
+
+    # Trivy Scan
+    - name: Trivy Scan
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: paylabs-backend:latest
+
+    # Push Images
+    - name: Push Images
+      run: |
+        docker push 197377640327.dkr.ecr.ap-south-1.amazonaws.com/paylabs-backend:latest
+        docker push 197377640327.dkr.ecr.ap-south-1.amazonaws.com/paylabs-frontend:latest
+
+    # # Deploy to K8s
+    # - name: Deploy to K8s
+    #   run: |
+    #     kubectl apply -f k8s/
