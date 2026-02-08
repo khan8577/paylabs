@@ -1,0 +1,34 @@
+services:
+  redis:
+    image: redis:7
+    container_name: redis
+    ports:
+      - "6379:6379"
+    networks:
+      - paylabs
+
+  backend:
+    image: backend-app
+    container_name: backend
+    ports:
+      - "5000:5000"
+    environment:
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      - redis
+    networks:
+      - paylabs
+
+  frontend:
+    image: frontend-app
+    container_name: frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - paylabs
+
+networks:
+  paylabs:
+    driver: bridge
