@@ -10,6 +10,8 @@ permissions:
 env:
   AWS_REGION: ap-south-1
   ECR_REGISTRY: 197377640327.dkr.ecr.ap-south-1.amazonaws.com
+  KUBE_NAMESPACE: paylabs
+  KUBECONFIG_PATH: /home/gh-runner/.kube/config
 
 jobs:
   test-and-scan:
@@ -19,6 +21,7 @@ jobs:
         image: redis:7-alpine
         ports:
           - 6379:6379
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -63,6 +66,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: test-and-scan
     if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+
     strategy:
       matrix:
         include:
@@ -103,34 +107,54 @@ jobs:
     runs-on: self-hosted
     needs: build-and-push
     if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Debug (helps confirm we are on k8s-master runner and kubeconfig exists)
-      - name: Debug runner & kubeconfig
+      - name: Verify kubectl + kubeconfig (self-hosted runner)
         run: |
           echo "RUNNER_NAME=$RUNNER_NAME"
           echo "USER=$(whoami)"
           echo "HOME=$HOME"
-          ls -la /home/gh-runner/.kube || true
-          test -f /home/gh-runner/.kube/config && echo "kubeconfig OK" || (echo "kubeconfig missing" && exit 1)
-          KUBECONFIG=/home/gh-runner/.kube/config kubectl config view --minify --raw | sed -n 's/ *server: //p'
-          KUBECONFIG=/home/gh-runner/.kube/config kubectl get nodes
+          which kubectl
+          kubectl version --client --short
+          test -f "${KUBECONFIG_PATH}" && echo "KUBECONFIG exists: ${KUBECONFIG_PATH}" || (echo "Missing kubeconfig at ${KUBECONFIG_PATH}" && exit 1)
+          KUBECONFIG="${KUBECONFIG_PATH}" kubectl config view --minify --raw | sed -n 's/ *server: //p'
+          KUBECONFIG="${KUBECONFIG_PATH}" kubectl get nodes -o wide
 
-      - name: Update image references to ECR
+      - name: Update image references to ECR (commit SHA)
         run: |
           sed -i "s|image: .*paylabs-frontend:.*|image: ${{ env.ECR_REGISTRY }}/paylabs-frontend:${{ github.sha }}|g" k8s/base/frontend-deployment.yaml
           sed -i "s|image: .*paylabs-backend:.*|image: ${{ env.ECR_REGISTRY }}/paylabs-backend:${{ github.sha }}|g" k8s/base/backend-deployment.yaml
 
-      - name: Deploy to Kubernetes
+      - name: Apply manifests
         run: |
-          export KUBECONFIG=/home/gh-runner/.kube/config
+          export KUBECONFIG="${KUBECONFIG_PATH}"
           kubectl apply -k k8s/base
+          kubectl -n "${KUBE_NAMESPACE}" get all
 
-      - name: Verify rollout
+      - name: Wait for rollout
         run: |
-          export KUBECONFIG=/home/gh-runner/.kube/config
-          kubectl -n paylabs rollout status deployment/frontend --timeout=180s
-          kubectl -n paylabs rollout status deployment/backend --timeout=180s
-          kubectl -n paylabs rollout status deployment/redis --timeout=180s
+          export KUBECONFIG="${KUBECONFIG_PATH}"
+          kubectl -n "${KUBE_NAMESPACE}" rollout status deployment/frontend --timeout=300s
+          kubectl -n "${KUBE_NAMESPACE}" rollout status deployment/backend --timeout=300s
+          kubectl -n "${KUBE_NAMESPACE}" rollout status deployment/redis --timeout=300s
+
+      # 🔥 If rollout fails, this prints the REAL reason (ImagePullBackOff, CrashLoop, probes, etc.)
+      - name: Debug on failure
+        if: failure()
+        run: |
+          export KUBECONFIG="${KUBECONFIG_PATH}"
+          echo "===== PODS ====="
+          kubectl -n "${KUBE_NAMESPACE}" get pods -o wide || true
+          echo "===== FRONTEND DESCRIBE ====="
+          kubectl -n "${KUBE_NAMESPACE}" describe deployment frontend || true
+          kubectl -n "${KUBE_NAMESPACE}" describe pods -l app=frontend || true
+          echo "===== FRONTEND LOGS ====="
+          kubectl -n "${KUBE_NAMESPACE}" logs -l app=frontend --tail=200 || true
+          echo "===== BACKEND DESCRIBE ====="
+          kubectl -n "${KUBE_NAMESPACE}" describe deployment backend || true
+          kubectl -n "${KUBE_NAMESPACE}" describe pods -l app=backend || true
+          echo "===== BACKEND LOGS ====="
+          kubectl -n "${KUBE_NAMESPACE}" logs -l app=backend --tail=200 || true
