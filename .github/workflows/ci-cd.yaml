@@ -232,7 +232,7 @@ jobs:
             ${{ env.ECR_REGISTRY }}/${{ matrix.repo }}:${{ github.sha }}
 
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: build-and-push
     if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
     steps:
