@@ -11,7 +11,7 @@ env:
   AWS_REGION: ap-south-1
   ECR_REGISTRY: 197377640327.dkr.ecr.ap-south-1.amazonaws.com
   KUBE_NAMESPACE: paylabs
-  KUBECONFIG_PATH: /home/gh-runner/.kube/config
+  KUBECONFIG_PATH: /root/.kube/config
 
 jobs:
   test-and-scan:
@@ -118,7 +118,7 @@ jobs:
           echo "USER=$(whoami)"
           echo "HOME=$HOME"
           which kubectl
-          kubectl version --client --short
+          kubectl version --client
           test -f "${KUBECONFIG_PATH}" && echo "KUBECONFIG exists: ${KUBECONFIG_PATH}" || (echo "Missing kubeconfig at ${KUBECONFIG_PATH}" && exit 1)
           KUBECONFIG="${KUBECONFIG_PATH}" kubectl config view --minify --raw | sed -n 's/ *server: //p'
           KUBECONFIG="${KUBECONFIG_PATH}" kubectl get nodes -o wide
@@ -132,7 +132,7 @@ jobs:
         run: |
           export KUBECONFIG="${KUBECONFIG_PATH}"
           kubectl apply -k k8s/base
-          kubectl -n "${KUBE_NAMESPACE}" get all
+          kubectl -n "${KUBE_NAMESPACE}" get pods -o wide
 
       - name: Wait for rollout
         run: |
@@ -141,20 +141,14 @@ jobs:
           kubectl -n "${KUBE_NAMESPACE}" rollout status deployment/backend --timeout=300s
           kubectl -n "${KUBE_NAMESPACE}" rollout status deployment/redis --timeout=300s
 
-      # 🔥 If rollout fails, this prints the REAL reason (ImagePullBackOff, CrashLoop, probes, etc.)
       - name: Debug on failure
         if: failure()
         run: |
           export KUBECONFIG="${KUBECONFIG_PATH}"
-          echo "===== PODS ====="
           kubectl -n "${KUBE_NAMESPACE}" get pods -o wide || true
-          echo "===== FRONTEND DESCRIBE ====="
-          kubectl -n "${KUBE_NAMESPACE}" describe deployment frontend || true
+          kubectl -n "${KUBE_NAMESPACE}" describe deploy frontend || true
           kubectl -n "${KUBE_NAMESPACE}" describe pods -l app=frontend || true
-          echo "===== FRONTEND LOGS ====="
           kubectl -n "${KUBE_NAMESPACE}" logs -l app=frontend --tail=200 || true
-          echo "===== BACKEND DESCRIBE ====="
-          kubectl -n "${KUBE_NAMESPACE}" describe deployment backend || true
+          kubectl -n "${KUBE_NAMESPACE}" describe deploy backend || true
           kubectl -n "${KUBE_NAMESPACE}" describe pods -l app=backend || true
-          echo "===== BACKEND LOGS ====="
           kubectl -n "${KUBE_NAMESPACE}" logs -l app=backend --tail=200 || true
