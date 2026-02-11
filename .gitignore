@@ -1,7 +1,5 @@
 # Dependencies
 node_modules/
-package-lock.json
-yarn.lock
 
 # Environment variables
 .env
@@ -9,8 +7,9 @@ yarn.lock
 .env.*.local
 
 # Build outputs
-frontend/build/
+build/
 dist/
+coverage/
 
 # Logs
 logs/
@@ -33,5 +32,3 @@ Thumbs.db
 
 # Cache
 .eslintcache
-
-# Docker
